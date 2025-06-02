@@ -21,7 +21,7 @@ MAX_ROWS_INITIAL_LOAD = 10000
 ADD_ROWS_COUNT = 1000
 DELETE_LAST_N_ROWS_DEFAULT = 500
 
-CSV_FILE_PATH = "ip_dataset.csv" 
+CSV_FILE_PATH = "ip_flow_dataset.csv" 
 COLUMNS_TO_EMBED = ['frame.number', 'frame.time', 'ip.src', 'ip.dst', 'tcp.srcport', 'tcp.dstport', '_ws.col.protocol', 'frame.len']
 NUM_QUERY_SAMPLES = 3
 VECTOR_DIM = None 
