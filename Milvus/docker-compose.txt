@@ -1,0 +1,11 @@
+To Install Milvus Standalone with Docker Compose
+Download the YAML file
+Download milvus-standalone-docker-compose.yml and save it as 
+
+wget https://github.com/milvus-io/milvus/releases/download/v2.0.2/milvus-standalone-docker-compose.yml -O docker-compose.yml
+
+Start Milvus
+In the same directory as the docker-compose.yml file,
+
+sudo docker-compose up -d
+
