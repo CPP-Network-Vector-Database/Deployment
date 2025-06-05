@@ -12,7 +12,7 @@ from plotly.subplots import make_subplots
 
 class FAISSPerformanceTracker:
     def __init__(self, model_name='distilbert-base-nli-stsb-mean-tokens'):
-        self.model = SentenceTransformer(model_name)
+        self.model = None
         self.model_name = model_name
         
         # Performance tracking lists
@@ -35,6 +35,59 @@ class FAISSPerformanceTracker:
         self.deletion_memory = []
         self.update_memory = []
         self.query_memory = []
+    
+    def load_model(self, model_name):
+        if self.model is None or self.model_name != model_name:
+            with st.spinner(f"Loading model: {model_name}..."):
+                self.model = SentenceTransformer(model_name)
+                self.model_name = model_name
+                st.success(f"Model {model_name} loaded successfully!")
+    
+    def reset_metrics(self):
+        self.insertion_sizes = []
+        self.deletion_sizes = []
+        self.update_sizes = []
+        self.query_sizes = []
+        
+        self.insertion_times = []
+        self.deletion_times = []
+        self.update_times = []
+        self.query_times = []
+        
+        self.insertion_cpu = []
+        self.deletion_cpu = []
+        self.update_cpu = []
+        self.query_cpu = []
+        
+        self.insertion_memory = []
+        self.deletion_memory = []
+        self.update_memory = []
+        self.query_memory = []
+    
+    def get_metrics_summary(self):
+        metrics_data = []
+        
+        operations = [
+            ('Insertion', self.insertion_sizes, self.insertion_times, self.insertion_cpu, self.insertion_memory),
+            ('Deletion', self.deletion_sizes, self.deletion_times, self.deletion_cpu, self.deletion_memory),
+            ('Update', self.update_sizes, self.update_times, self.update_cpu, self.update_memory),
+            ('Query', self.query_sizes, self.query_times, self.query_cpu, self.query_memory)
+        ]
+        
+        for op_name, sizes, times, cpu, memory in operations:
+            if len(times) > 0:
+                metrics_data.append({
+                    'Operation': op_name,
+                    'Total Operations': len(times),
+                    'Avg Time (s)': f"{np.mean(times):.4f}",
+                    'Min Time (s)': f"{np.min(times):.4f}",
+                    'Max Time (s)': f"{np.max(times):.4f}",
+                    'Avg CPU (%)': f"{np.mean(cpu):.2f}",
+                    'Avg Memory (MB)': f"{np.mean(memory):.2f}",
+                    'Total Items Processed': sum(sizes)
+                })
+        
+        return pd.DataFrame(metrics_data) if metrics_data else None
     
     def _measure_performance(self, func, *args, **kwargs):
         pid = os.getpid()
@@ -61,6 +114,9 @@ class FAISSPerformanceTracker:
         return result, execution_time, cpu_usage, mem_usage
     
     def track_insertion(self, index, new_packet_texts):
+        if self.model is None:
+            raise ValueError("Model not loaded. Please select and load a model first.")
+        
         # Normalize embeddings
         new_embeddings = self.model.encode(new_packet_texts, convert_to_numpy=True)
         new_embeddings = new_embeddings / np.linalg.norm(new_embeddings, axis=1, keepdims=True)
@@ -100,6 +156,9 @@ class FAISSPerformanceTracker:
         return actual_deletions
     
     def track_update(self, index, num_updates, new_packet_texts):
+        if self.model is None:
+            raise ValueError("Model not loaded. Please select and load a model first.")
+        
         if index.ntotal == 0:
             return 0
         
@@ -121,6 +180,9 @@ class FAISSPerformanceTracker:
         return actual_updates
     
     def track_query(self, index, query_texts, k=5):
+        if self.model is None:
+            raise ValueError("Model not loaded. Please select and load a model first.")
+        
         if index.ntotal == 0:
             return [], []
         
@@ -271,83 +333,153 @@ def load_csv_data(csv_path):
         st.error(f"Error loading CSV file: {str(e)}")
         return None
 
+def create_faiss_index(embeddings):
+    dimension = embeddings.shape[1]
+    nlist = min(100, max(1, int(np.sqrt(len(embeddings)))))
+    quantizer = faiss.IndexFlatL2(dimension)
+    index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_L2)
+    
+    index.train(embeddings)
+    index.add(embeddings)
+    return index
+
 def initialize_session_state():
     if 'tracker' not in st.session_state:
         st.session_state.tracker = FAISSPerformanceTracker()
     
-    if 'index' not in st.session_state:
-        # Try to load CSV data first
-        csv_path = st.sidebar.text_input(
-            "CSV File Path:", 
-            value="/home/pes1ug22am100/Documents/WeeklyProgress/Week8-9/FAISS/ip_flow_dataset.csv",
-            help="Enter the path to your CSV file" # I NEED HELP HERE!!! Not able to load the csv file
-        )
-        
-        if st.sidebar.button("Load CSV Data") or 'csv_loaded' not in st.session_state:
-            packet_texts = load_csv_data(csv_path)
-            
-            if packet_texts:
-                st.sidebar.success(f"Loaded {len(packet_texts)} entries from CSV")
-                
-                # Create embeddings with progress bar
-                with st.spinner("Creating embeddings from CSV data..."):
-                    embeddings = st.session_state.tracker.model.encode(packet_texts, convert_to_numpy=True)
-                    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-                
-                # Create FAISS index
-                dimension = embeddings.shape[1]
-                nlist = min(100, max(1, int(np.sqrt(len(embeddings)))))
-                quantizer = faiss.IndexFlatL2(dimension)
-                index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_L2)
-                
-                with st.spinner("Training FAISS index..."):
-                    index.train(embeddings)
-                    index.add(embeddings)
-                
-                st.session_state.index = index
-                st.session_state.data_texts = packet_texts.copy()
-                st.session_state.csv_loaded = True
-                st.rerun()
-            else:
-                # Fallback to sample data if CSV loading fails- This is where I'm at right now
-                st.sidebar.warning("Could not load CSV, using sample data")
-                sample_texts = [
-                    "192.168.1.1 192.168.1.2 TCP 80 443",
-                    "10.0.0.1 10.0.0.2 UDP 53 8080",
-                    "172.16.0.1 172.16.0.2 HTTP 80 8080",
-                    "192.168.0.1 192.168.0.2 HTTPS 443 443"
-                ]
-                
-                # Create embeddings 
-                embeddings = st.session_state.tracker.model.encode(sample_texts, convert_to_numpy=True)
-                embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-                
-                # Create FAISS index
-                dimension = embeddings.shape[1]
-                nlist = min(4, max(1, int(np.sqrt(len(embeddings)))))
-                quantizer = faiss.IndexFlatL2(dimension)
-                index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_L2)
-                index.train(embeddings)
-                index.add(embeddings)
-                
-                st.session_state.index = index
-                st.session_state.data_texts = sample_texts.copy()
-                st.session_state.csv_loaded = True
+    if 'model_loaded' not in st.session_state:
+        st.session_state.model_loaded = False
+    
+    if 'data_embedded' not in st.session_state:
+        st.session_state.data_embedded = False
 
 def main():
     st.set_page_config(page_title="FAISS Performance Tracker", layout="wide")
-    st.title("FAISS Performance Tracker with DistilBERT")
-    st.markdown("Perform CRUD operations on network packet data and visualize performance metrics")
+    st.title("FAISS Performance Tracker with Multiple Models")
+    st.markdown("Choose your model, load data, and perform CRUD operations to visualize performance metrics")
     
-    # Initialize session state first
+    # Initialize session state
     initialize_session_state()
     
-    # Show data loading status in the main area if not loaded yet
-    if 'csv_loaded' not in st.session_state:
-        st.info("Please load your CSV data using the sidebar controls first!")
+    # Model selection in sidebar
+    st.sidebar.header("Model Configuration")
+    
+    modelList = [
+        'paraphrase-MiniLM-L12-v2',
+        "all-MiniLM-L6-v2", 
+        'distilbert-base-nli-stsb-mean-tokens', 
+        'microsoft/codebert-base', 
+        'bert-base-nli-mean-tokens', 
+        'sentence-transformers/average_word_embeddings_komninos', 
+        'all-mpnet-base-v2'
+    ]
+    
+    selected_model = st.sidebar.selectbox(
+        "Choose a model:",
+        modelList,
+        index=2,  # Default to distilbert
+        help="Select the sentence transformer model to use for embeddings"
+    )
+    
+    # Check if model has changed
+    model_changed = (hasattr(st.session_state.tracker, 'model_name') and 
+                    st.session_state.tracker.model_name != selected_model)
+    
+    if model_changed:
+        st.sidebar.warning("Model changed! You'll need to re-embed your data.")
+        if st.sidebar.button("Switch Model & Reset"):
+            # Reset everything for new model
+            st.session_state.tracker = FAISSPerformanceTracker(selected_model)
+            st.session_state.model_loaded = False
+            st.session_state.data_embedded = False
+            if 'index' in st.session_state:
+                del st.session_state.index
+            if 'data_texts' in st.session_state:
+                del st.session_state.data_texts
+            st.rerun()
+    
+    # Load model button
+    if not st.session_state.model_loaded or st.session_state.tracker.model is None:
+        if st.sidebar.button("Load Model"):
+            try:
+                st.session_state.tracker.load_model(selected_model)
+                st.session_state.model_loaded = True
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Error loading model: {str(e)}")
+    else:
+        st.sidebar.success(f"Model loaded: {st.session_state.tracker.model_name}")
+        
+        # Option to reset metrics for comparison
+        if st.sidebar.button("🧹 Reset Performance Metrics"):
+            st.session_state.tracker.reset_metrics()
+            st.sidebar.success("Metrics reset!")
+            st.rerun()
+    
+    # Data loading section
+    st.sidebar.header("Data Configuration")
+    
+    if st.session_state.model_loaded:
+        csv_path = st.sidebar.text_input(
+            "CSV File Path:", 
+            value="/home/pes1ug22am100/Documents/WeeklyProgress/Week8-9/FAISS/ip_flow_dataset.csv",
+            help="Enter the path to your CSV file"
+        )
+        
+        data_source = st.sidebar.radio(
+            "Data Source:",
+            ["Load from CSV", "Use Sample Data"],
+            help="Choose whether to load data from CSV or use sample data"
+        )
+        
+        if st.sidebar.button("Load & Embed Data") or not st.session_state.data_embedded:
+            if data_source == "Load from CSV":
+                packet_texts = load_csv_data(csv_path)
+                if packet_texts is None:
+                    st.sidebar.warning("Could not load CSV, switching to sample data")
+                    data_source = "Use Sample Data"
+            
+            if data_source == "Use Sample Data" or packet_texts is None:
+                packet_texts = [
+                    "192.168.1.1 192.168.1.2 TCP 80 443",
+                    "10.0.0.1 10.0.0.2 UDP 53 8080",
+                    "172.16.0.1 172.16.0.2 HTTP 80 8080",
+                    "192.168.0.1 192.168.0.2 HTTPS 443 443",
+                    "10.10.10.1 10.10.10.2 FTP 21 21",
+                    "172.16.1.1 172.16.1.2 SSH 22 22"
+                ]
+            
+            if packet_texts:
+                try:
+                    with st.spinner("Creating embeddings..."):
+                        embeddings = st.session_state.tracker.model.encode(packet_texts, convert_to_numpy=True)
+                        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+                    
+                    with st.spinner("Creating FAISS index..."):
+                        index = create_faiss_index(embeddings)
+                    
+                    st.session_state.index = index
+                    st.session_state.data_texts = packet_texts.copy()
+                    st.session_state.data_embedded = True
+                    
+                    st.sidebar.success(f"Loaded and embedded {len(packet_texts)} entries!")
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.sidebar.error(f"Error during embedding: {str(e)}")
+    else:
+        st.sidebar.info("Please load a model first")
+    
+    # Main content
+    if not st.session_state.model_loaded:
+        st.info("Please select and load a model from the sidebar to get started!")
         return
     
-    # Sidebar for operations
+    if not st.session_state.data_embedded:
+        st.info("Please load and embed your data from the sidebar to continue!")
+        return
+    
+    # Operations section
     st.sidebar.header("Operations")
     operation = st.sidebar.selectbox(
         "Choose Operation:",
@@ -370,19 +502,22 @@ def main():
             num_entries = st.slider("Number of entries to generate (if text area is empty):", 1, 1000, 10)
             
             if st.button("Insert Data"):
-                if new_data.strip():
-                    new_texts = [line.strip() for line in new_data.split('\n') if line.strip()]
-                else:
-                    # Generate random data
-                    new_texts = [f"192.168.{i//255}.{i%255} 10.0.{i//255}.{i%255} TCP {80+i} {8000+i}" 
-                               for i in range(num_entries)]
-                
-                with st.spinner("Inserting data..."):
-                    inserted_count = st.session_state.tracker.track_insertion(st.session_state.index, new_texts)
-                    st.session_state.data_texts.extend(new_texts)
-                
-                st.success(f"Inserted {inserted_count} entries successfully!")
-                st.info(f"Total entries in database: {st.session_state.index.ntotal}")
+                try:
+                    if new_data.strip():
+                        new_texts = [line.strip() for line in new_data.split('\n') if line.strip()]
+                    else:
+                        # Generate random data
+                        new_texts = [f"192.168.{i//255}.{i%255} 10.0.{i//255}.{i%255} TCP {80+i} {8000+i}" 
+                                   for i in range(num_entries)]
+                    
+                    with st.spinner("Inserting data..."):
+                        inserted_count = st.session_state.tracker.track_insertion(st.session_state.index, new_texts)
+                        st.session_state.data_texts.extend(new_texts)
+                    
+                    st.success(f"Inserted {inserted_count} entries successfully!")
+                    st.info(f"Total entries in database: {st.session_state.index.ntotal}")
+                except Exception as e:
+                    st.error(f"Error during insertion: {str(e)}")
         
         elif operation == "Delete":
             st.write("Remove entries from the database")
@@ -391,14 +526,17 @@ def main():
             
             if st.button("Delete Data"):
                 if st.session_state.index.ntotal > 0:
-                    with st.spinner("Deleting data..."):
-                        deleted_count = st.session_state.tracker.track_deletion(st.session_state.index, num_to_delete)
-                        # Remove from data_texts as well (approximately)
-                        if len(st.session_state.data_texts) >= deleted_count:
-                            st.session_state.data_texts = st.session_state.data_texts[:-deleted_count]
-                    
-                    st.success(f"Deleted {deleted_count} entries successfully!")
-                    st.info(f"Remaining entries in database: {st.session_state.index.ntotal}")
+                    try:
+                        with st.spinner("Deleting data..."):
+                            deleted_count = st.session_state.tracker.track_deletion(st.session_state.index, num_to_delete)
+                            # Remove from data_texts as well (approximately)
+                            if len(st.session_state.data_texts) >= deleted_count:
+                                st.session_state.data_texts = st.session_state.data_texts[:-deleted_count]
+                        
+                        st.success(f"Deleted {deleted_count} entries successfully!")
+                        st.info(f"Remaining entries in database: {st.session_state.index.ntotal}")
+                    except Exception as e:
+                        st.error(f"Error during deletion: {str(e)}")
                 else:
                     st.warning("No data to delete!")
         
@@ -414,18 +552,21 @@ def main():
             
             if st.button("Update Data"):
                 if st.session_state.index.ntotal > 0:
-                    if update_data.strip():
-                        new_texts = [line.strip() for line in update_data.split('\n') if line.strip()]
-                    else:
-                        # Generate random update data
-                        new_texts = [f"10.10.{i//255}.{i%255} 172.16.{i//255}.{i%255} HTTPS {443+i} {9000+i}" 
-                                   for i in range(num_to_update)]
-                    
-                    with st.spinner("Updating data..."):
-                        updated_count = st.session_state.tracker.track_update(st.session_state.index, num_to_update, new_texts)
-                    
-                    st.success(f"Updated {updated_count} entries successfully!")
-                    st.info(f"Total entries in database: {st.session_state.index.ntotal}")
+                    try:
+                        if update_data.strip():
+                            new_texts = [line.strip() for line in update_data.split('\n') if line.strip()]
+                        else:
+                            # Generate random update data
+                            new_texts = [f"10.10.{i//255}.{i%255} 172.16.{i//255}.{i%255} HTTPS {443+i} {9000+i}" 
+                                       for i in range(num_to_update)]
+                        
+                        with st.spinner("Updating data..."):
+                            updated_count = st.session_state.tracker.track_update(st.session_state.index, num_to_update, new_texts)
+                        
+                        st.success(f"Updated {updated_count} entries successfully!")
+                        st.info(f"Total entries in database: {st.session_state.index.ntotal}")
+                    except Exception as e:
+                        st.error(f"Error during update: {str(e)}")
                 else:
                     st.warning("No data to update!")
         
@@ -439,26 +580,29 @@ def main():
             
             if st.button("Search"):
                 if query_text.strip() and st.session_state.index.ntotal > 0:
-                    with st.spinner("Searching..."):
-                        distances, indices = st.session_state.tracker.track_query(
-                            st.session_state.index, [query_text], k
-                        )
-                    
-                    st.success(f"Query completed!")
-                    
-                    # Display results
-                    if len(distances) > 0 and len(distances[0]) > 0:
-                        st.write("**Search Results:**")
-                        results_df = pd.DataFrame({
-                            'Rank': range(1, len(distances[0]) + 1),
-                            'Index': indices[0],
-                            'Similarity Score': [f"{1-d:.4f}" for d in distances[0]],  # Convert L2 to similarity
-                            'Data': [st.session_state.data_texts[i] if i < len(st.session_state.data_texts) 
-                                   else f"Entry {i}" for i in indices[0]]
-                        })
-                        st.dataframe(results_df, use_container_width=True)
-                    else:
-                        st.warning("No results found!")
+                    try:
+                        with st.spinner("Searching..."):
+                            distances, indices = st.session_state.tracker.track_query(
+                                st.session_state.index, [query_text], k
+                            )
+                        
+                        st.success(f"Query completed!")
+                        
+                        # Display results
+                        if len(distances) > 0 and len(distances[0]) > 0:
+                            st.write("**Search Results:**")
+                            results_df = pd.DataFrame({
+                                'Rank': range(1, len(distances[0]) + 1),
+                                'Index': indices[0],
+                                'Similarity Score': [f"{1-d:.4f}" for d in distances[0]],  # Convert L2 to similarity
+                                'Data': [st.session_state.data_texts[i] if i < len(st.session_state.data_texts) 
+                                       else f"Entry {i}" for i in indices[0]]
+                            })
+                            st.dataframe(results_df, use_container_width=True)
+                        else:
+                            st.warning("No results found!")
+                    except Exception as e:
+                        st.error(f"Error during query: {str(e)}")
                 elif not query_text.strip():
                     st.warning("Please enter a query!")
                 else:
@@ -467,8 +611,16 @@ def main():
         elif operation == "View Data":
             st.write("Current database statistics")
             st.metric("Total Entries", st.session_state.index.ntotal)
-            st.metric("Model", st.session_state.tracker.model_name)
-            st.metric("CSV Data Loaded", "Yes" if 'csv_loaded' in st.session_state else "No")
+            st.metric("Current Model", st.session_state.tracker.model_name)
+            st.metric("Data Embedded", "Yes" if st.session_state.data_embedded else "No")
+            
+            # Performance metrics table
+            st.write("**Performance Metrics Summary:**")
+            metrics_df = st.session_state.tracker.get_metrics_summary()
+            if metrics_df is not None:
+                st.dataframe(metrics_df, use_container_width=True)
+            else:
+                st.info("No performance metrics available yet. Perform some operations to see metrics!")
             
             if st.session_state.data_texts:
                 st.write("**Sample Data:**")
@@ -532,12 +684,23 @@ def main():
                 if st.session_state.tracker.update_times:
                     avg_update_time = np.mean(st.session_state.tracker.update_times)
                     st.metric("Avg Update Time", f"{avg_update_time:.4f}s")
+            
+            
         else:
             st.info("Performance graphs will appear here after you perform operations")
             st.write("Try inserting, deleting, updating, or querying data to see performance metrics!")
+            
+            # Show model info while waiting
+            st.write("**Current Configuration:**")
+            st.write(f"*Model**: {st.session_state.tracker.model_name}")
+            st.write(f"**Data Points**: {st.session_state.index.ntotal}")
 
-    # Footer cuz we done
+    # Footer
     st.markdown("---")
+    st.markdown("1. Perform operations with one model and note the performance")
+    st.markdown("2. Switch to a different model using the sidebar")
+    st.markdown("3. Perform similar operations and compare the results")
+    st.markdown("4. Use the 'View Data' tab to see detailed performance metrics")
 
 if __name__ == "__main__":
     main()
