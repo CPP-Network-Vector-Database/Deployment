@@ -7,7 +7,7 @@
 1. Clone the repository:
    ```bash
    git clone https://github.com/CPP-Network-Vector-Database/Deployment
-   cd streamlit-network-analysis
+   cd Deployment
    ```
 
 2. Make the shell script executable:
