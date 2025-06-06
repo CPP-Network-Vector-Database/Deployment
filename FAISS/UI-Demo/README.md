@@ -47,7 +47,7 @@
 
 3. Update the dataset path in your application:
    ```python
-   csv_path = "path/to/your/network_data.csv"
+   csv_path = "path/to/network_data.csv"
    ```
 
 4. Run the Streamlit app:
@@ -61,7 +61,7 @@
 
 Set the `CSV_PATH` environment variable before running:
 ```bash
-export CSV_PATH="/path/to/your/network_data.csv"
+export CSV_PATH="/path/to/network_data.csv"
 ./run_streamlit_app.sh
 ```
 *If no dataset is provided, the scripts automatically generate sample network data with in the same format
@@ -99,7 +99,6 @@ docker-compose.yml handles:
 3. Memory Issues with Large Datasets:
    - Reduce dataset size or use sampling
    - Increase system memory allocation
-   - Enable data chunking in the application
 
 4. Docker Container Issues:
    ```bash
@@ -110,16 +109,3 @@ docker-compose.yml handles:
    # Restart container
    docker restart <container_name>
    ```
-5. If the app doesn't load:
-        1. Verify the application is running on `http://localhost:8501`
-        2. Check firewall settings for port 8501
-        3. Ensure no proxy or VPN interference
-
-### Configurations
-
-#### Environment Variables
-
-- `CSV_PATH`: Path to network data CSV file
-- `STREAMLIT_PORT`: Custom port for the application (default: 8501)
-- `DEBUG_MODE`: Enable detailed logging (true/false)
-- `MAX_RECORDS`: Limit dataset size for performance
