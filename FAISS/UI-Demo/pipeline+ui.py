@@ -411,7 +411,7 @@ def main():
         st.sidebar.success(f"Model loaded: {st.session_state.tracker.model_name}")
         
         # Option to reset metrics for comparison
-        if st.sidebar.button("🧹 Reset Performance Metrics"):
+        if st.sidebar.button("Reset Performance Metrics"):
             st.session_state.tracker.reset_metrics()
             st.sidebar.success("Metrics reset!")
             st.rerun()
