@@ -1,0 +1,8 @@
+auth_modules:
+  my_db:
+    type: userpass
+    userpass:
+      username: hpecpp
+      password: 'hpecpp@1234'
+    options:
+      sslmode: disable
