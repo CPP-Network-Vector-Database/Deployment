@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  ubuntu_node:
+    build: .
+    deploy:
+      replicas: 32
+    volumes:
+      - ./network_simulator.py:/app/network_simulator.py
+    networks:
+      - ubuntu_hosts_network
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
+networks:
+  ubuntu_hosts_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/24        
